@@ -1,7 +1,6 @@
 // Update an existing academic subject owned by the authenticated user
 query "subjects/{subjects_id}" verb=PATCH {
   api_group = "subjects"
-  auth = ""
 
   input {
     int subjects_id filters=min:1
@@ -16,24 +15,24 @@ query "subjects/{subjects_id}" verb=PATCH {
       field_name = "id"
       field_value = $input.subjects_id
     } as $subject
-
+  
     // Verify subject exists
     precondition ($subject != null) {
       error_type = "notfound"
       error = "Subject not found."
     }
-
+  
     // Ensure subject belongs to the authenticated user
     precondition ($subject.user_id == $auth.id) {
       error_type = "accessdenied"
       error = "You do not have permission to modify this subject."
     }
-
+  
     util.get_raw_input {
       encoding = "json"
       exclude_middleware = false
     } as $raw_input
-
+  
     db.patch subjects {
       field_name = "id"
       field_value = $input.subjects_id
@@ -44,4 +43,3 @@ query "subjects/{subjects_id}" verb=PATCH {
   response = $updated_subject
   guid = "wFk8I70sy23M5mJwScSgZ6D2euc"
 }
-
