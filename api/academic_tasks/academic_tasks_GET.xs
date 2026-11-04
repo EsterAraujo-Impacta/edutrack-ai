@@ -1,7 +1,6 @@
 // List all academic tasks belonging to the authenticated user
 query academic_tasks verb=GET {
   api_group = "academic_tasks"
-  auth = ""
 
   input {
     // Optional filter by subject ID
@@ -18,4 +17,3 @@ query academic_tasks verb=GET {
   response = $tasks
   guid = "EBtrf066ggVy-ljsJRerInn5rl8"
 }
-

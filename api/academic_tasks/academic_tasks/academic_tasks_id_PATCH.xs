@@ -1,7 +1,6 @@
 // Update an existing academic task owned by the authenticated user
 query "academic_tasks/{academic_tasks_id}" verb=PATCH {
   api_group = "academic_tasks"
-  auth = ""
 
   input {
     int academic_tasks_id filters=min:1
@@ -18,19 +17,19 @@ query "academic_tasks/{academic_tasks_id}" verb=PATCH {
       field_name = "id"
       field_value = $input.academic_tasks_id
     } as $task
-
+  
     // Verify task exists
     precondition ($task != null) {
       error_type = "notfound"
       error = "Academic task not found."
     }
-
+  
     // Ensure task belongs to the authenticated user
     precondition ($task.user_id == $auth.id) {
       error_type = "accessdenied"
       error = "You do not have permission to modify this academic task."
     }
-
+  
     // If subject_id is being updated, verify that the target subject belongs to the authenticated user
     conditional {
       if ($input.subject_id != null) {
@@ -38,7 +37,7 @@ query "academic_tasks/{academic_tasks_id}" verb=PATCH {
           field_name = "id"
           field_value = $input.subject_id
         } as $subject
-
+      
         conditional {
           if ($subject == null) {
             throw {
@@ -47,7 +46,7 @@ query "academic_tasks/{academic_tasks_id}" verb=PATCH {
             }
           }
         }
-
+      
         conditional {
           if ($subject.user_id != $auth.id) {
             throw {
@@ -58,12 +57,12 @@ query "academic_tasks/{academic_tasks_id}" verb=PATCH {
         }
       }
     }
-
+  
     util.get_raw_input {
       encoding = "json"
       exclude_middleware = false
     } as $raw_input
-
+  
     db.patch academic_tasks {
       field_name = "id"
       field_value = $input.academic_tasks_id

@@ -1,7 +1,6 @@
 // List all academic subjects belonging to the authenticated user
 query subjects verb=GET {
   api_group = "subjects"
-  auth = ""
 
   input {
   }
@@ -16,4 +15,3 @@ query subjects verb=GET {
   response = $subjects
   guid = "wgHy2LM9SO9NZPk2Dj1cOJdk7q4"
 }
-
