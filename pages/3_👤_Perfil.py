@@ -16,10 +16,12 @@ Tabela `user` no Xano:
   - senha       : password (sensitive/internal)
 """
 
+import io
+import os
 import streamlit as st
 from pathlib import Path
 
-from pages.auth_helper import post, get
+from pages.auth_helper import post, get, XANO_API_BASE
 
 # ---------------------------------------------------------------------------
 # Helpers de token (session_state + arquivo .auth_token opcional)
@@ -36,6 +38,19 @@ def _save_token(token: str) -> None:
 
 def _get_token() -> str | None:
     return st.session_state.get("jwt_token")
+
+
+def _generate_report_pdf_bytes(token: str) -> bytes:
+    """Gera o PDF de desempenho acadêmico em memória usando reportlab."""
+    from scripts.generate_report import fetch_report_data, generate_pdf_report
+
+    api_base = XANO_API_BASE.rstrip("/")
+    data = fetch_report_data(api_base=api_base, token=token)
+
+    buffer = io.BytesIO()
+    generate_pdf_report(report_data=data, output_path=buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +153,20 @@ if token:
                 disabled=True,
             )
 
+        st.subheader("📄 Relatório de Desempenho Acadêmico")
+        try:
+            pdf_data = _generate_report_pdf_bytes(token)
+            st.download_button(
+                label="📥 Baixar relatorio_desempenho.pdf",
+                data=pdf_data,
+                file_name="relatorio_desempenho.pdf",
+                mime="application/pdf",
+                help="Gera e baixa o relatório consolidado com disciplinas e tarefas.",
+            )
+        except Exception as report_err:
+            st.warning(f"Não foi possível preparar o PDF para download: {report_err}")
+
+        st.write("")
         if st.button("Sair"):
             st.session_state.pop("jwt_token", None)
             try:
