@@ -1,29 +1,50 @@
 import streamlit as st
+from pages.session_helper import load_user_workspace, render_sidebar_auth
 
-# Configuração da Página (Título na aba do navegador)
-st.set_page_config(page_title="EduTrack AI", page_icon="🎓")
-
-# Título Principal
+st.set_page_config(page_title="EduTrack AI – Dashboard", page_icon="🎓")
 st.title("🎓 EduTrack AI")
+st.caption("Seu assistente inteligente de organização e desempenho acadêmico.")
 
-# Sidebar (Menu Lateral)
-st.sidebar.header("Menu")
-menu_option = st.sidebar.radio("Navegar", ["Dashboard", "Disciplinas", "Tarefas"])
+token = render_sidebar_auth()
 
-# Conteúdo Dinâmico
-if menu_option == "Dashboard":
-    st.write("Bem-vindo ao seu assistente acadêmico!")
-    st.info("Conecte ao Xano para ver seus dados reais.")
-    
-    # Exemplo de Métrica Visual
-    col1, col2 = st.columns(2)
-    col1.metric("Disciplinas Ativas", "0")
-    col2.metric("Tarefas Pendentes", "0")
+st.divider()
 
-elif menu_option == "Disciplinas":
-    st.subheader("Minhas Disciplinas")
-    st.write("Aqui listaremos as matérias cadastradas no backend.")
+if not token:
+  st.info(
+      "👋 Bem-vindo ao **EduTrack AI**! Para acessar suas disciplinas, gerenciar"
+      " tarefas e emitir relatórios em PDF, acesse a aba **👤 Perfil** no menu"
+      " lateral esquerdo e entre com sua conta."
+  )
+else:
+  try:
+    user, subjects, tasks = load_user_workspace(token)
+    nome = user.get("nome") or "Estudante"
 
-elif menu_option == "Tarefas":
-    st.subheader("Gerenciamento de Tarefas")
-    st.checkbox("Exemplo: Estudar Streamlit")
+    st.subheader(f"Olá, {nome}! 👋")
+    st.write("Aqui está o resumo atual do seu semestre:")
+
+    total_disc = len(subjects)
+    total_tasks = len(tasks)
+    concluidas = sum(
+        1
+        for t in tasks
+        if str(t.get("status", "")).lower()
+        in {"completed", "concluida", "concluída", "done"}
+    )
+    pendentes = total_tasks - concluidas
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📚 Disciplinas Ativas", total_disc)
+    col2.metric("⏳ Tarefas Pendentes", pendentes)
+    col3.metric("✅ Tarefas Concluídas", concluidas)
+
+    if total_tasks > 0:
+      st.write("")
+      pct = concluidas / total_tasks
+      st.progress(pct, text=f"Progresso geral das atividades: {pct * 100:.0f}%")
+
+  except Exception as e:
+    st.error(f"Erro ao carregar seu resumo: {e}")
+    if st.button("🔄 Recarregar dados"):
+      st.cache_data.clear()
+      st.rerun()

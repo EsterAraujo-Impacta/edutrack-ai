@@ -1,135 +1,101 @@
 import io
 import time
-import json
-import urllib.request
-from datetime import datetime
-from pathlib import Path
 import streamlit as st
-
-from pages.auth_helper import get_config
+from pages.session_helper import (
+    SUBJECT_API_BASE,
+    load_user_workspace,
+    require_login,
+    xano_request,
+)
 
 st.set_page_config(page_title="Disciplinas", page_icon="📚")
+token = require_login()
 
-st.title("Gestão de Disciplinas")
+user, subjects_data, tasks_data = load_user_workspace(token)
+user_id = user.get("id")
+nome_aluno = user.get("nome") or "Estudante"
 
-# ---------------------------------------------------------------------------
-# Identificação do Token e das URLs Base do Xano (prioriza st.secrets)
-# ---------------------------------------------------------------------------
-token = st.session_state.get("jwt_token")
-if not token:
-    token_file = Path(".auth_token")
-    if token_file.exists():
-        token = token_file.read_text(encoding="utf-8").strip()
+st.title("📚 Gestão de Disciplinas")
+st.caption(f"Olá, **{nome_aluno}**! Gerencie suas matérias cadastradas.")
 
-# Obtém as URLs bases a partir de st.secrets (com fallback para env)
-subject_api_base = get_config("XANO_SUBJECT_API_BASE", "").rstrip("/")
-auth_api_base = get_config("XANO_AUTH_API_BASE", "").rstrip("/")
-academic_api_base = get_config("XANO_ACADEMIC_API_BASE", "").rstrip("/")
-default_api_base = get_config("XANO_API_BASE", "").rstrip("/")
-
-def xano_request(base_url: str, endpoint: str, method: str = "GET", data: dict = None, token_jwt: str = None) -> dict:
-    """Função auxiliar para fazer requisições HTTP seguras apontando para o grupo de API correto."""
-    target_base = base_url or default_api_base
-    url = f"{target_base.rstrip('/')}{endpoint}"
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if token_jwt:
-        headers["Authorization"] = f"Bearer {token_jwt}"
-
-    encoded_data = json.dumps(data).encode("utf-8") if data is not None else None
-    req = urllib.request.Request(url, data=encoded_data, headers=headers, method=method.upper())
-    
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        return json.loads(resp.read().decode(charset))
-
-# ---------------------------------------------------------------------------
-# Botão de Download do Relatório de Desempenho (PDF)
-# ---------------------------------------------------------------------------
-if token:
+# Botão sob demanda para gerar o PDF sem gastar requisições ao abrir a página
+if st.button("📄 Gerar Relatório de Desempenho (PDF)"):
+  with st.spinner("Montando PDF..."):
     try:
-        from scripts.generate_report import fetch_report_data, generate_pdf_report
+      from scripts.generate_report import generate_pdf_report
 
-        api_base = subject_api_base or default_api_base
-        report_data = fetch_report_data(api_base=api_base, token=token)
+      report_data = {
+          "user": user,
+          "subjects": subjects_data,
+          "tasks": tasks_data,
+      }
+      pdf_buffer = io.BytesIO()
+      generate_pdf_report(report_data=report_data, output_path=pdf_buffer)
+      pdf_buffer.seek(0)
 
-        pdf_buffer = io.BytesIO()
-        generate_pdf_report(report_data=report_data, output_path=pdf_buffer)
-        pdf_buffer.seek(0)
-
-        st.download_button(
-            label="📄 Baixar Relatório de Desempenho (PDF)",
-            data=pdf_buffer.getvalue(),
-            file_name="relatorio_desempenho.pdf",
-            mime="application/pdf",
-            help="Clique para baixar o relatório completo com seu progresso nas disciplinas.",
-        )
+      st.download_button(
+          label="📥 Clique aqui para baixar o PDF",
+          data=pdf_buffer.getvalue(),
+          file_name="relatorio_desempenho.pdf",
+          mime="application/pdf",
+      )
     except Exception as e:
-        st.warning(f"Relatório PDF temporariamente indisponível: {e}")
-else:
-    st.info("💡 Faça login na aba **Perfil** para liberar a emissão do seu relatório PDF de desempenho.")
+      st.error(f"Erro ao gerar PDF: {e}")
 
 st.divider()
 
-# Abas para separar Listagem de Cadastro
-tab_lista, tab_novo = st.tabs(["📋 Listar", "➕ Nova Disciplina"])
+tab_lista, tab_novo = st.tabs(["📋 Minhas Disciplinas", "➕ Nova Disciplina"])
 
 with tab_novo:
-    st.subheader("Cadastrar Nova Matéria")
-    with st.form("form_disciplina"):
-        nome = st.text_input("Nome da Disciplina", placeholder="ex: Python Basics")
-        professor = st.text_input("Nome do Professor", placeholder="ex: Prof. Oriel")
-        carga_horaria = st.number_input("Carga Horária (horas)", min_value=1, max_value=200, value=40)
-        
-        submitted = st.form_submit_button("Salvar")
+  st.subheader("Cadastrar Nova Matéria")
+  with st.form("form_disciplina", clear_on_submit=True):
+    nome = st.text_input("Nome da Disciplina *", placeholder="ex: Python Basics")
+    professor = st.text_input(
+        "Nome do Professor *", placeholder="ex: Prof. Oriel"
+    )
+    carga_horaria = st.number_input(
+        "Carga Horária (horas)", min_value=1, max_value=300, value=40
+    )
 
-        if submitted:
-            if not token:
-                st.error("Você precisa estar autenticado para cadastrar uma disciplina.")
-            elif not nome or not professor:
-                st.warning("Preencha o nome da disciplina e o professor.")
-            else:
-                try:
-                    # 1. Busca os dados do usuário para obter o user_id ($auth.id)
-                    user_data = xano_request(auth_api_base, "/auth/me", method="GET", token_jwt=token)
-                    user_id = user_data.get("id")
+    submitted = st.form_submit_button("Salvar Disciplina")
 
-                    # 2. Monta o payload exato para o Xano
-                    payload = {
-                        "name": nome,
-                        "teacher": professor,
-                        "hours": int(carga_horaria),
-                        "user_id": user_id,
-                        "created_at": int(time.time() * 1000)
-                    }
-
-                    # 3. Envia POST diretamente para o grupo de API de subjects (6HS-JuTA)
-                    xano_request(subject_api_base, "/subjects", method="POST", data=payload, token_jwt=token)
-
-                    st.success(f"Disciplina **{nome}** cadastrada com sucesso no Xano!")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Erro ao salvar no Xano: {exc}")
+    if submitted:
+      if not nome.strip() or not professor.strip():
+        st.warning("Preencha o nome da disciplina e o professor.")
+      else:
+        try:
+          payload = {
+              "name": nome.strip(),
+              "teacher": professor.strip(),
+              "hours": int(carga_horaria),
+              "user_id": user_id,
+              "created_at": int(time.time() * 1000),
+          }
+          xano_request(
+              SUBJECT_API_BASE,
+              "/subjects",
+              method="POST",
+              data=payload,
+              token_jwt=token,
+          )
+          st.cache_data.clear()
+          st.success(f"Disciplina **{nome}** cadastrada com sucesso!")
+          st.rerun()
+        except Exception as exc:
+          st.error(f"Erro ao salvar no Xano: {exc}")
 
 with tab_lista:
-    if not token:
-        st.info("Faça login para carregar suas disciplinas salvas no Xano.")
-    else:
-        try:
-            # Busca as disciplinas reais diretamente no grupo de API de subjects (6HS-JuTA)
-            subjects_data = xano_request(subject_api_base, "/subjects", method="GET", token_jwt=token)
-
-            if not subjects_data:
-                st.info("Nenhuma disciplina cadastrada no momento.")
-            else:
-                tabela_formatada = []
-                for s in subjects_data:
-                    tabela_formatada.append({
-                        "ID": s.get("id"),
-                        "Nome": s.get("name") or s.get("nome") or "—",
-                        "Professor": s.get("teacher") or s.get("professor") or "—",
-                        "Carga Horária": f"{s.get('hours')}h" if s.get("hours") is not None else "—"
-                    })
-
-                st.dataframe(tabela_formatada, use_container_width=True)
-        except Exception as exc:
-            st.error(f"Erro ao buscar disciplinas no Xano: {exc}")
+  if not subjects_data:
+    st.info("Você ainda não possui disciplinas cadastradas.")
+  else:
+    tabela_formatada = [
+        {
+            "Nome": s.get("name") or s.get("nome") or "—",
+            "Professor": s.get("teacher") or s.get("professor") or "—",
+            "Carga Horária": (
+                f"{s.get('hours')}h" if s.get("hours") is not None else "—"
+            ),
+        }
+        for s in subjects_data
+    ]
+    st.dataframe(tabela_formatada, use_container_width=True)
