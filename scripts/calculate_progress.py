@@ -9,12 +9,41 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import urllib.error
 import urllib.request
 
-XANO_API_BASE = os.getenv("XANO_API_BASE", "")
-XANO_TOKEN = os.getenv("XANO_TOKEN", "") or os.getenv("XANO_AUTH_TOKEN", "")
+
+def _get_config(key: str, default: str = "") -> str:
+    """Tenta carregar de st.secrets se disponível, com fallback para os.getenv."""
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+
+    val = os.getenv(key)
+    if val is not None and val != "":
+        return val
+
+    try:
+        from dotenv import load_dotenv
+        _env_path = Path(__file__).resolve().parent.parent / ".env"
+        if _env_path.exists():
+            load_dotenv(dotenv_path=_env_path)
+            val = os.getenv(key)
+            if val is not None and val != "":
+                return val
+    except Exception:
+        pass
+
+    return default
+
+
+XANO_API_BASE = _get_config("XANO_ACADEMIC_API_BASE") or _get_config("XANO_API_BASE", "")
+XANO_TOKEN = _get_config("XANO_TOKEN", "") or _get_config("XANO_AUTH_TOKEN", "")
 
 
 def fetch_tasks_for_subject(
@@ -26,15 +55,15 @@ def fetch_tasks_for_subject(
     Consulta tarefas acadêmicas vinculadas ao usuário autenticado no backend CRUD.
     Filtra pela disciplina especificada via query parameter ou pós-processamento.
     Inclui o cabeçalho Authorization: Bearer <token> se informado via auth_token,
-    parâmetro --token ou variável de ambiente XANO_TOKEN / XANO_AUTH_TOKEN.
+    parâmetro --token ou variável de ambiente / secrets.
     """
-    base_url = (api_base or os.getenv("XANO_API_BASE", "") or XANO_API_BASE).rstrip("/")
-    token = auth_token or os.getenv("XANO_TOKEN", "") or os.getenv("XANO_AUTH_TOKEN", "") or XANO_TOKEN
+    base_url = (api_base or _get_config("XANO_ACADEMIC_API_BASE") or _get_config("XANO_API_BASE", "") or XANO_API_BASE).rstrip("/")
+    token = auth_token or _get_config("XANO_TOKEN", "") or _get_config("XANO_AUTH_TOKEN", "") or XANO_TOKEN
 
     if not base_url:
         raise ValueError(
-            "URL base da API (XANO_API_BASE) não configurada. "
-            "Defina a variável de ambiente XANO_API_BASE ou passe o parâmetro api_base."
+            "URL base da API (XANO_API_BASE ou XANO_ACADEMIC_API_BASE) não configurada. "
+            "Defina em .streamlit/secrets.toml, no .env ou passe o parâmetro api_base."
         )
 
     endpoint_url = f"{base_url}/academic_tasks"
@@ -164,13 +193,13 @@ def main() -> None:
         "--api-base",
         type=str,
         default=None,
-        help="URL base da API Xano (opcional, fallback para env XANO_API_BASE)."
+        help="URL base da API Xano (opcional, fallback para secrets ou env XANO_API_BASE)."
     )
     parser.add_argument(
         "--token",
         type=str,
         default=None,
-        help="Token de autenticação JWT (opcional, fallback para env XANO_TOKEN ou XANO_AUTH_TOKEN)."
+        help="Token de autenticação JWT (opcional, fallback para secrets ou env XANO_TOKEN)."
     )
     parser.add_argument(
         "--mock-tasks",
@@ -206,4 +235,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

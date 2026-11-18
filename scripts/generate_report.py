@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
-"""scripts/generate_report.py – Gerador de relatório PDF de desempenho acadêmico.
+"""
+scripts/generate_report.py – Gerador de relatório PDF de desempenho acadêmico.
 
-Coleta os dados do aluno (disciplinas e tarefas) no backend Xano, calcula as
-métricas de progresso por disciplina e gera um documento PDF formatado
+Coleta os dados do aluno (disciplinas e tarefas) no backend Xano,
+calcula as métricas de progresso por disciplina e gera um documento PDF formatado
 utilizando a biblioteca ReportLab.
 """
 
 import argparse
-from datetime import datetime
 import json
 import os
-from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional
-import urllib.error
 import urllib.request
-
-# Carrega as variáveis do .env logo na inicialização
-try:
-  from dotenv import load_dotenv
-
-  load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
-except ImportError:
-  pass
+import urllib.error
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 try:
   from reportlab.lib import colors
@@ -38,6 +31,34 @@ except ImportError:
   )
   sys.exit(1)
 
+
+def _get_config(key: str, default: str = "") -> str:
+  """Recupera configuração priorizando st.secrets com fallback para os.getenv."""
+  try:
+    import streamlit as st
+    if key in st.secrets:
+      return str(st.secrets[key])
+  except Exception:
+    pass
+
+  val = os.getenv(key)
+  if val is not None and val != "":
+    return val
+
+  try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+      load_dotenv(dotenv_path=_env_path)
+      val = os.getenv(key)
+      if val is not None and val != "":
+        return val
+  except Exception:
+    pass
+
+  return default
+
+
 # Importa a função de cálculo de progresso existente para reutilização
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
@@ -45,23 +66,14 @@ try:
 except ImportError:
 
   def calculate_subject_progress(
-      subject_id: Any, tasks: Optional[List[Dict[str, Any]]] = None, **kwargs
+      subject_id: int, tasks: Optional[List[Dict[str, Any]]] = None, **kwargs
   ) -> Dict[str, Any]:
-    str_subject_id = str(subject_id).strip() if subject_id is not None else ""
-
-    # Suporta diferentes estruturas de ID das tarefas no Xano
+    # Garante comparação segura convertendo ambos os IDs para string
+    str_subject_id = str(subject_id).strip()
     subject_tasks = [
         t
         for t in (tasks or [])
-        if str(
-            t.get("subject_id")
-            or t.get("subjects_id")
-            or (
-                t.get("subject", {}).get("id")
-                if isinstance(t.get("subject"), dict)
-                else t.get("subject")
-            )
-        ).strip()
+        if str(t.get("subject_id") or t.get("subjects_id") or "").strip()
         == str_subject_id
     ]
 
@@ -101,7 +113,7 @@ def _resolve_token(cli_token: Optional[str]) -> str:
   if cli_token:
     return cli_token
   for var_name in ("XANO_TOKEN", "XANO_AUTH_TOKEN"):
-    val = os.getenv(var_name, "").strip()
+    val = _get_config(var_name, "").strip()
     if val:
       return val
   token_file = Path(".auth_token")
@@ -113,12 +125,12 @@ def _resolve_token(cli_token: Optional[str]) -> str:
 def _resolve_api_base(cli_base: Optional[str]) -> str:
   if cli_base:
     return cli_base.rstrip("/")
-  base = os.getenv("XANO_API_BASE", "").rstrip("/")
+  base = _get_config("XANO_API_BASE", "").rstrip("/")
   if not base:
-    base = os.getenv("XANO_AUTH_API_BASE", "").rstrip("/")
+    base = _get_config("XANO_AUTH_API_BASE", "").rstrip("/")
   if not base:
     raise ValueError(
-        "URL base da API não configurada no .env (XANO_API_BASE ou"
+        "URL base da API não configurada em st.secrets nem no .env (XANO_API_BASE ou"
         " XANO_AUTH_API_BASE)."
     )
   return base
@@ -131,9 +143,9 @@ def fetch_report_data(api_base: str, token: str) -> Dict[str, Any]:
       "Authorization": f"Bearer {token}",
   }
 
-  auth_base = os.getenv("XANO_AUTH_API_BASE", api_base).rstrip("/")
-  academic_base = os.getenv("XANO_ACADEMIC_API_BASE", api_base).rstrip("/")
-  subject_base = os.getenv("XANO_SUBJECT_API_BASE", api_base).rstrip("/")
+  auth_base = _get_config("XANO_AUTH_API_BASE", api_base).rstrip("/")
+  academic_base = _get_config("XANO_ACADEMIC_API_BASE", api_base).rstrip("/")
+  subject_base = _get_config("XANO_SUBJECT_API_BASE", api_base).rstrip("/")
 
   def _fetch(url: str) -> Any:
     print(f"Buscando: {url}")

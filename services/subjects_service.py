@@ -8,9 +8,18 @@ from datetime import datetime, timezone
 import os
 from typing import Any, Dict, List, Optional
 
-# Tenta carregar variáveis de ambiente ou Streamlit secrets se disponíveis
-XANO_API_BASE = os.getenv("XANO_API_BASE", "")
-XANO_AUTH_TOKEN = os.getenv("XANO_AUTH_TOKEN", "")
+def _get_config(key: str, default: str = "") -> str:
+    """Tenta obter configuração do Streamlit secrets com fallback para os.getenv."""
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+XANO_API_BASE = _get_config("XANO_SUBJECT_API_BASE") or _get_config("XANO_API_BASE", "")
+XANO_AUTH_TOKEN = _get_config("XANO_AUTH_TOKEN", "")
 
 # Armazenamento em memória para execução fora do Streamlit ou testes
 _in_memory_subjects: List[Dict[str, Any]] = [

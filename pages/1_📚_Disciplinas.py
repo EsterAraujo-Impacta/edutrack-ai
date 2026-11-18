@@ -1,5 +1,4 @@
 import io
-import os
 import time
 import json
 import urllib.request
@@ -7,12 +6,14 @@ from datetime import datetime
 from pathlib import Path
 import streamlit as st
 
+from pages.auth_helper import get_config
+
 st.set_page_config(page_title="Disciplinas", page_icon="📚")
 
 st.title("Gestão de Disciplinas")
 
 # ---------------------------------------------------------------------------
-# Identificação do Token e das URLs Base do Xano
+# Identificação do Token e das URLs Base do Xano (prioriza st.secrets)
 # ---------------------------------------------------------------------------
 token = st.session_state.get("jwt_token")
 if not token:
@@ -20,14 +21,16 @@ if not token:
     if token_file.exists():
         token = token_file.read_text(encoding="utf-8").strip()
 
-# Obtém as URLs bases do .env
-subject_api_base = os.getenv("XANO_SUBJECT_API_BASE", "").rstrip("/")
-auth_api_base = os.getenv("XANO_AUTH_API_BASE", "").rstrip("/")
-academic_api_base = os.getenv("XANO_ACADEMIC_API_BASE", "").rstrip("/")
+# Obtém as URLs bases a partir de st.secrets (com fallback para env)
+subject_api_base = get_config("XANO_SUBJECT_API_BASE", "").rstrip("/")
+auth_api_base = get_config("XANO_AUTH_API_BASE", "").rstrip("/")
+academic_api_base = get_config("XANO_ACADEMIC_API_BASE", "").rstrip("/")
+default_api_base = get_config("XANO_API_BASE", "").rstrip("/")
 
 def xano_request(base_url: str, endpoint: str, method: str = "GET", data: dict = None, token_jwt: str = None) -> dict:
     """Função auxiliar para fazer requisições HTTP seguras apontando para o grupo de API correto."""
-    url = f"{base_url.rstrip('/')}{endpoint}"
+    target_base = base_url or default_api_base
+    url = f"{target_base.rstrip('/')}{endpoint}"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if token_jwt:
         headers["Authorization"] = f"Bearer {token_jwt}"
@@ -46,7 +49,7 @@ if token:
     try:
         from scripts.generate_report import fetch_report_data, generate_pdf_report
 
-        api_base = subject_api_base or os.getenv("XANO_API_BASE", "").rstrip("/")
+        api_base = subject_api_base or default_api_base
         report_data = fetch_report_data(api_base=api_base, token=token)
 
         pdf_buffer = io.BytesIO()
