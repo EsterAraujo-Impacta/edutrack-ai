@@ -1,10 +1,12 @@
-"""pages/session_helper.py – Gerenciador centralizado de sessão, cache e sidebar."""
+"""pages/session_helper.py – Gerenciador centralizado de sessão, temas, cache e sidebar."""
 
+from datetime import datetime
 import json
 import os
 import urllib.error
 import urllib.request
 import streamlit as st
+from scripts.theme_manager import inject_theme_css, render_theme_switcher
 
 
 def get_secret(key: str, default: str = "") -> str:
@@ -19,6 +21,10 @@ def get_secret(key: str, default: str = "") -> str:
 AUTH_API_BASE = get_secret("XANO_AUTH_API_BASE") or get_secret("XANO_API_BASE")
 SUBJECT_API_BASE = get_secret("XANO_SUBJECT_API_BASE") or AUTH_API_BASE
 ACADEMIC_API_BASE = get_secret("XANO_ACADEMIC_API_BASE") or AUTH_API_BASE
+FLASHCARDS_API_BASE = (
+    get_secret("XANO_FLASHCARDS_API_BASE") or ACADEMIC_API_BASE
+)
+NOTES_API_BASE = get_secret("XANO_NOTES_API_BASE") or AUTH_API_BASE
 
 
 def xano_request(
@@ -53,9 +59,9 @@ def xano_request(
     raise RuntimeError(f"Erro de conexão: {exc.reason}") from None
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_user_workspace(jwt: str):
-  """Carrega usuário, disciplinas e tarefas com cache de 45s para evitar HTTP 429."""
+  """Carrega usuário, disciplinas e tarefas com cache de 2 min para evitar HTTP 429."""
   user = xano_request(AUTH_API_BASE, "/auth/me", method="GET", token_jwt=jwt)
   user_id = user.get("id")
 
@@ -72,33 +78,136 @@ def load_user_workspace(jwt: str):
       or []
   )
 
-  # Garante isolamento estrito por user_id
   my_subjects = [s for s in subjects if s.get("user_id") == user_id]
   my_tasks = [t for t in all_tasks if t.get("user_id") == user_id]
 
   return user, my_subjects, my_tasks
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def load_user_flashcards(jwt: str, user_id: int) -> list[dict]:
+  """Carrega os flashcards do usuário logado com cache."""
+  cards = (
+      xano_request(
+          FLASHCARDS_API_BASE, "/flashcards", method="GET", token_jwt=jwt
+      )
+      or []
+  )
+  return [c for c in cards if c.get("user_id") == user_id]
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_user_notes(jwt: str, user_id: int) -> list[dict]:
+  """Busca todas as anotações do usuário logado."""
+  try:
+    notes = (
+        xano_request(NOTES_API_BASE, "/notes", method="GET", token_jwt=jwt)
+        or []
+    )
+    if isinstance(notes, dict):
+      notes = [notes]
+    return [n for n in notes if n.get("user_id") == user_id]
+  except Exception:
+    return []
+
+
+def create_user_note(jwt: str, content: str) -> dict:
+  """Cria uma nova anotação no Xano."""
+  now_str = datetime.now().strftime("%d/%m/%Y às %H:%M")
+  res = xano_request(
+      NOTES_API_BASE,
+      "/notes",
+      method="POST",
+      data={"content": content, "updated_at": now_str},
+      token_jwt=jwt,
+  )
+  load_user_notes.clear()
+  return res or {"content": content, "updated_at": now_str}
+
+
+def update_user_note(jwt: str, note_id: int, content: str) -> dict:
+  """Atualiza uma anotação existente (inclusive limpando o texto)."""
+  now_str = datetime.now().strftime("%d/%m/%Y às %H:%M")
+  res = xano_request(
+      NOTES_API_BASE,
+      f"/notes/{note_id}",
+      method="PATCH",
+      data={"content": content, "updated_at": now_str},
+      token_jwt=jwt,
+  )
+  load_user_notes.clear()
+  return res or {"id": note_id, "content": content, "updated_at": now_str}
+
+
+def delete_user_note(jwt: str, note_id: int) -> None:
+  """Exclui uma anotação."""
+  xano_request(
+      NOTES_API_BASE,
+      f"/notes/{note_id}",
+      method="DELETE",
+      token_jwt=jwt,
+  )
+  load_user_notes.clear()
+
+
 def render_sidebar_auth() -> str | None:
-  """Renderiza status de login e botão Sair na barra lateral. Retorna o token ativo."""
+  """Injeta o tema global e renderiza seletor de temas, login, nota rápida e Sair."""
+  inject_theme_css()
   token = st.session_state.get("jwt_token")
 
   with st.sidebar:
     st.divider()
+    render_theme_switcher()
+    st.divider()
+
     if token:
       try:
         user, _, _ = load_user_workspace(token)
-        nome = user.get("nome") or user.get("email") or "Estudante"
-        st.success(f"👤 Conectado como:\n**{nome}**")
-        if st.button("🚪 Sair (Logout)", use_container_width=True):
+      except Exception as exc:
+        err_str = str(exc)
+        if "401" in err_str or "403" in err_str:
+          st.warning("Sessão expirada. Faça login novamente.")
           st.session_state.pop("jwt_token", None)
           st.cache_data.clear()
-          st.rerun()
-      except Exception:
-        st.warning("Sessão expirada.")
+          return None
+        else:
+          st.warning(
+              "⏳ Servidor ocupando limite de requisições. Aguarde 15s e"
+              " recarregue."
+          )
+          return token
+
+      nome = user.get("nome") or user.get("email") or "Estudante"
+      st.success(f"👤 Conectado como:\n**{nome}**")
+
+      # Mini Quick Notes na Sidebar
+      with st.expander("🗒️ Anotação Rápida", expanded=False):
+        with st.form("form_sidebar_quick_note", clear_on_submit=True):
+          side_text = st.text_area(
+              "Anotação rápida",
+              height=110,
+              label_visibility="collapsed",
+              placeholder="Escreva um lembrete rápido...",
+          )
+          submitted_side = st.form_submit_button(
+              "💾 Salvar anotação", use_container_width=True
+          )
+
+        if submitted_side:
+          if side_text.strip():
+            try:
+              create_user_note(token, side_text.strip())
+              st.toast("Anotação salva!", icon="✅")
+              st.rerun()
+            except Exception as exc:
+              st.error(f"Erro ao salvar: {exc}")
+          else:
+            st.toast("Digite algo antes de salvar.", icon="⚠️")
+
+      if st.button("🚪 Sair (Logout)", use_container_width=True):
         st.session_state.pop("jwt_token", None)
         st.cache_data.clear()
-        return None
+        st.rerun()
     else:
       st.info("🔒 Você não está logado.\nAcesse **Perfil** no menu acima.")
 

@@ -1,5 +1,10 @@
+from datetime import date
 import streamlit as st
-from pages.session_helper import load_user_workspace, render_sidebar_auth
+from pages.session_helper import (
+    load_user_flashcards,
+    load_user_workspace,
+    render_sidebar_auth,
+)
 
 st.set_page_config(page_title="EduTrack AI – Dashboard", page_icon="🎓")
 st.title("🎓 EduTrack AI")
@@ -12,13 +17,25 @@ st.divider()
 if not token:
   st.info(
       "👋 Bem-vindo ao **EduTrack AI**! Para acessar suas disciplinas, gerenciar"
-      " tarefas e emitir relatórios em PDF, acesse a aba **👤 Perfil** no menu"
-      " lateral esquerdo e entre com sua conta."
+      " tarefas, revisar flashcards e emitir relatórios em PDF, acesse a aba"
+      " **👤 Perfil** no menu lateral esquerdo e entre com sua conta."
   )
 else:
   try:
     user, subjects, tasks = load_user_workspace(token)
+    user_id = user.get("id")
     nome = user.get("nome") or "Estudante"
+
+    try:
+      cards = load_user_flashcards(token, user_id)
+      today_str = date.today().strftime("%Y-%m-%d")
+      due_cards_count = sum(
+          1
+          for c in cards
+          if str(c.get("next_review") or today_str)[:10] <= today_str
+      )
+    except Exception:
+      due_cards_count = 0
 
     st.subheader(f"Olá, {nome}! 👋")
     st.write("Aqui está o resumo atual do seu semestre:")
@@ -33,10 +50,11 @@ else:
     )
     pendentes = total_tasks - concluidas
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📚 Disciplinas Ativas", total_disc)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("📚 Disciplinas", total_disc)
     col2.metric("⏳ Tarefas Pendentes", pendentes)
-    col3.metric("✅ Tarefas Concluídas", concluidas)
+    col3.metric("✅ Concluídas", concluidas)
+    col4.metric("🧠 Flashcards Hoje", due_cards_count)
 
     if total_tasks > 0:
       st.write("")
