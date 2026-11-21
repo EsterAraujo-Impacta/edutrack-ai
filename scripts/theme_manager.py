@@ -153,6 +153,23 @@ def inject_theme_css() -> ThemeTokens:
   .stFormSubmitButton > button:not([kind="primary"]):hover {{
       border-color: var(--accent-color) !important;
   }}
+
+  /* Troca visualmente o texto "app" no menu lateral por "🎓 Início" */
+  [data-testid="stSidebarNavItems"] li:first-child a span {{
+      display: none !important;
+  }}
+  [data-testid="stSidebarNavItems"] li:first-child a::after {{
+      content: "🎓 Início";
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+  }}
+
+  /* Esconde auth_helper e session_helper do menu lateral sem mover os arquivos */
+  [data-testid="stSidebarNavItems"] li:has(a[href*="auth_helper"]),
+  [data-testid="stSidebarNavItems"] li:has(a[href*="session_helper"]) {{
+      display: none !important;
+  }}
   </style>
   """
   st.markdown(css, unsafe_allow_html=True)
